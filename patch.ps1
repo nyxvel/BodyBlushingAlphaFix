@@ -6,7 +6,7 @@
     transparent pixels are grey 127, and BC7 shares a p-bit between colour and alpha, so encoding 127
     exactly forces alpha to 1. This re-encodes each Blush_*.dds: alpha <= 8 (about 3% opacity) becomes 0,
     the rest is stretched back to 1..255, and fully transparent pixels get grey 128.
-    Textures that are already fixed (hardly any alpha-1 pixels) are skipped.
+    Textures that are already fixed (grey 128 under the transparent pixels) are skipped.
 .PARAMETER Source
     Folder with Body Blushing's Blush_*.dds (textures\Actors\Character\Overlays\CheeseBlushOverlays).
     Default: that folder in the game's Data folder (found through the registry).
@@ -49,7 +49,8 @@ using System.IO;
 public static class BlushAlpha
 {
     // Fixes an uncompressed 32-bit TGA in place. Returns the number of alpha-1 pixels before and after,
-    // or null (file untouched) when less than 1% of the pixels have alpha 1: already fixed.
+    // or null (file untouched) when it is already fixed: grey 128 under the transparent pixels, where
+    // the originals have grey 127 or black.
     public static int[] Clean(string path)
     {
         byte[] b = File.ReadAllBytes(path);
@@ -57,9 +58,15 @@ public static class BlushAlpha
         int w = BitConverter.ToUInt16(b, 12), h = BitConverter.ToUInt16(b, 14);
         int start = 18 + b[0], end = start + w * h * 4;
 
-        int before = 0;
-        for (int i = start + 3; i < end; i += 4) if (b[i] == 1) before++;
-        if (before < w * h / 100) return null;
+        int before = 0, transparent = 0, grey128 = 0;
+        for (int i = start; i < end; i += 4) {
+            if (b[i + 3] == 1) before++;
+            else if (b[i + 3] == 0) {
+                transparent++;
+                if (b[i] == 0x80 && b[i + 1] == 0x80 && b[i + 2] == 0x80) grey128++;
+            }
+        }
+        if (transparent > 0 && grey128 >= transparent * 0.99) return null;
 
         byte[] alpha = new byte[256];
         for (int a = 9; a < 256; a++) alpha[a] = (byte)Math.Max(1, Math.Round((a - 8) * 255.0 / 247.0));
@@ -96,6 +103,10 @@ foreach ($t in $textures) {
     & $Texconv -nologo -y -srgb -f BC7_UNORM_SRGB -m 0 -dx10 -o $dest $tga | Out-Null
     if ($LASTEXITCODE) { throw "texconv failed to encode $($t.Name)" }
     Remove-Item $tga
+    # texconv names the output .DDS: keep the original file name.
+    $out = Join-Path $dest "$($t.BaseName).DDS"
+    [IO.File]::Move($out, "$out.tmp")
+    [IO.File]::Move("$out.tmp", (Join-Path $dest $t.Name))
     Write-Host ("{0}: alpha-1 pixels {1} -> {2}, {3:n1} s" -f $t.Name, $counts[0], $counts[1], $sw.Elapsed.TotalSeconds)
 }
 Remove-Item $work -Recurse -Force
