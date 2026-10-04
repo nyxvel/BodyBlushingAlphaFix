@@ -1,0 +1,7 @@
+# Body Blushing's textures (originals and patched copies) stay local
+original/
+fixed/
+out/
+*.dds
+*.tga
+*.zip
